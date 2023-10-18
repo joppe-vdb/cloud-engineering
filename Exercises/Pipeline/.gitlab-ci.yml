@@ -1,0 +1,32 @@
+stages:
+  - package
+  - deploy
+
+build docker image:
+  stage: package
+  image: docker:24.0.6
+  services:
+    - docker:24.0.6-dind
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE -t $CI_REGISTRY_IMAGE:$CI_PIPELINE_IID .
+    - docker image ls
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - docker push --all-tags $CI_REGISTRY_IMAGE
+
+
+deploy to production:
+  stage: deploy
+  image:
+    name: amazon/aws-cli:2.13.25
+    entrypoint: [""]
+  before_script:
+    - yum install -y gettext
+  script:
+    - aws --version
+    - export DEPLOY_TOKEN=$(echo $GITLAB_DEPLOY_TOKEN | tr -d "\n" | base64)
+    - envsubst < AWS-EB/Dockerrun.aws.json > Dockerrun.aws.json
+    - envsubst < AWS-EB/auth.json > auth.json
+    - aws s3 cp Dockerrun.aws.json s3://$AWS_S3_BUCKET/Dockerrun.aws.json
+    - aws s3 cp auth.json s3://$AWS_S3_BUCKET/auth.json
+    - aws elasticbeanstalk create-application-version --application-name "$EB_APP_NAME" --version-label $CI_PIPELINE_IID --source-bundle S3Bucket=$AWS_S3_BUCKET,S3Key=Dockerrun.aws.json
+    - aws elasticbeanstalk update-environment --application-name "$EB_APP_NAME" --version-label $CI_PIPELINE_IID --environment-name "$EB_ENV_NAME"
