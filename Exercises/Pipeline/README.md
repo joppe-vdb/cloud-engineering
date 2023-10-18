@@ -39,26 +39,7 @@ FROM nginx:1.23.1-alpine
 COPY demo-website /usr/share/nginx/html
  ```
 
-Note that we use a specific version tag instead of simply the latest version of nginx. Whenever we are building docker images within a pipeline we want all changes to be managed by our repository's version control to assure we have consistent results when running the pipeline at a later date. The latest version might change tomorrow which means that a build today might not be the same as a build tomorrow.
-
-We also selected the alpine version which is smaller. It is always advised to use more compact version of an image when dealing with them in a pipeline since they have to be downloaded everytime the pipeline is executed.
-
- ✅**TASK:** go to https://hub.docker.com/_/nginx and look for the latest available alpine release of nginx. Change the Dockerfile if necessary.
-
 ### 3.2) Build the docker image within the pipeline
-We now have a Dockerfile that is ready to be built. We could build it on our local machine and push it to AWS Beanstalk but that would require some manual steps. Lets look at our '.gitlab-ci.yml' file and implement a job to build our docker image.
-
-We are using the GitLab Runners with the Docker executor. This means that our jobs are running within a docker image that we get to choose. To build a docker image we will have to run docker within this Runner's docker image. We need Docker in Docker (dind)! https://hub.docker.com/_/docker
-
-The Docker in Docker image only includes the client by default. In order build images we need both the docker client and docker deamon. For this reason we will need to run the docker deamon as a service to our docker in docker image. We once again use fixed version tags so make sure to look for the latest available versions.
-
-To identify our docker image we also add some tags using the -t option of the docker build command. In order to always have a unique tag we use the GitLab CI/CD predefined variables to add the following tags:
-- -t $CI_REGISTRY_IMAGE
-    - This will resolve into the GitLab Repository's container registry URL
-- -t \$CI_REGISTRY_IMAGE:$CI_PIPELINE_IID
-    - This will resolve into the same URL appended by a unique ID for the pipeline it was built in
-
-You can see a list of all predefined variables here: https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
 
 ✅**TASK:** Remove the previous '.gitlab-ci.yml' and create the following '.gitlab-ci.yml' file. Make sure you are making changes in your feature branch.
 
@@ -78,28 +59,7 @@ build docker image:
 ```
 Commit the changes (don't make a merge request) and wait for the pipeline to run. Then have a look at the logs.
 
-![](img/2022-10-13-18-18-40.png)
-
-Wait for the job to finish
-
-![](img/2022-10-13-18-19-48.png)
-
-We can see the process of the docker image layers being created to build the nginx image.
-
-![](img/2022-10-13-18-21-53.png)
-
-And here we see the step where we copied the webpage into the container. Aswell as the tags that we created to identify the container.
-
-![](img/2022-10-13-18-23-36.png)
-
-Great we were able to build a docker image inside our pipeline! But where did the container image go? As you might have guessed it was destroyed as soon as the runner destroyed our job container. We will need a place to store our packaged containers in order to pass them to AWS Beanstalk. This is where the Container Registry comes into play.
-
 ## 4) Push to GitLab Container Registry
-Containers are not just regular files that we can simply handle as an asrtifact within our pipeline. We could publish our image to Docker Hub and pull it to AWS Beanstalk from there. But Docker Hub is a public registry and we might want our images to remain private. For this reason GitLab includes a Container Registry for each git repository. We will simple push our image from within the pipeline to this private registry in order to preserve the docker image.
-
-You can find the GitLab Container Registry by navigating to Packages & Container Registries > Container Registry.
-
-Because it is a private registry we will need to authenticate before we can push. Luckily there are some predefined variables we can use to both contact the registry and authenticate our job container.
 
 ✅**TASK:** Add the following two commands to your 'build docker image' job. make sure to replace the \<placeholders\> with the correct predefined variables.
 
@@ -116,14 +76,6 @@ Commit your changes and check if your image has landed in the Container Registry
 ![](img/2022-10-13-18-51-51.png)
 
 ## 5) Deploying to AWS Beanstalk
-We now have our container ready in the GitLab Container Registry. The only step that is left is getting AWS Elastic Beanstalk to pull this image as its latest application version. We could do this manually in the AWS Console. But with the power of AWS CLI and GitLab jobs we can automate this task.
-
-The following actions need to happen in order for the application to deploy:
-- AWS Beanstalk needs to be informed about which registry to contact and what image to pull from it
-- AWS Beanstalk needs to authenticate to the GitLab Container Registry and pull the image
-- AWS Beanstalk needs to implement the image as a new version of the application
-
-Which means our job needs to authenticate in order to use AWS CLI and AWS Beanstalk needs to authenticate in order to access the image on the Container Registry. We can already authenticate to AWS using our AWS credentials (aws access key id and aws secret access key). We still need to create a way for AWS EB to authenticate to our Container Registry.
 
 ✅**TASK:** In GitLab navigate to Settings > Repository > Deploy tokens. Click Expand and fill in the following information:
 
@@ -175,15 +127,6 @@ deploy to production:
 ```
 make sure to add 'deploy' to the list of stages at the beginning of the file.
 
-This job will run in a container that has AWS CLI already installed. Before the script runs we also install the gettext package that includes the envsubst utility we will need in our script.
-The script performs the following actions:
-- Show the AWS CLI version in the logs
-- Substitute the variables in the Dockerrun.aws.json file and auth.json file with the values in the Environment variables
-- Upload the Dockerrun.aws.json and auth.json file to the EB S3 Bucket
-    - These files include the instructions that AWS EB will use to create a new version of the application aswell aw the authentication token that is needed to access the GitLab Container Repository
-- Create a new AWS EB application version by telling AWS EB to look at the Dockerrun.aws.json file that was uploaded to the S3 Bucket
-- Update the AWS EB Envrionment with the new version
-
 ✅**TASK:** Analyse the actions of this job and make sure there are no mistakes. If you find something that does not match your expectations you chould change it before creating a new commit. If you are sure everything is correct try running the pipeline and wait for AWS EB to deploy your webpage.
 
 ![](img/2022-10-13-20-41-37.png)
@@ -196,30 +139,3 @@ We have lift off!!
 
 ![](img/2022-10-13-21-06-31.png)
 You should now see this page when visiting the application's URL.
-
-# Now it is up to you!
-In the '/web-app' directory you can find a web application that needs to be built using yarn. Simply run the following commands in the '/web-app' directory.
-
-```bash
-yarn install
-yarn lint
-yarn test
-yarn build
-```
-
-✅**TASK:** You are tasked with setting up a pipeline to automatically deploy a reat application to AWS EB. Create a new branch in which you setup a new pipeline that includes the following stages and jobs:
-- Stages
-    - Build
-    - Package
-    - Deploy
-- Jobs
-    - build web application
-        - performs the yarn build and stores them as in artifact in the /build directory
-    - package web application
-        - package the /build into an nginx docker image
-    - deploy to aws
-        - deploy the image from the GitLab registry to AWS EB
-
-Once you were able to run this pipeline sucessfully, create e merge request to merge this set-up into the main branch. Assign Bram and Alexander to this merge request.
-
-Good Luck!
